@@ -9,6 +9,13 @@ contest](https://www.kaggle.com/c/decoding-the-human-brain)
     python train.py
 
 
+## Get started with the data analysis
+
+   ipython notebook --pylab=inline
+
+And load the notebook that is here.
+
+
 ## TODO:
 
   - other classifiers (sklearn)
