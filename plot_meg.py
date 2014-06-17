@@ -50,7 +50,7 @@ evoked.plot_topomap(0.15, ch_type='mag', layout=layout, size=10, colorbar=False)
 #evoked.plot_topomap(times, ch_type='mag', layout=layout, size=10, colorbar=False)
 
 evoked = EvokedArray(data[labels==1].mean(axis=0) - data[labels==0].mean(axis=0), info, tmin=d['tmin'])
-evoked.plot_topomap(0.15, ch_type='mag', layout=layout, size=10, colorbar=False)
+evoked.plot_topomap(0.25, ch_type='mag', layout=layout, size=10, colorbar=False)
 
 
 # TODO use the EpochsArray
