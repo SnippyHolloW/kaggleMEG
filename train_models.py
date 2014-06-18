@@ -49,11 +49,24 @@ def normalize_stupid(data, mean=None, std=None):
 
 
 sfreq, X_train, y_train = load_and_savez("data/train_subject0*.mat", "train")
+# TODO CHANGE
+X_train = X_train[:, :, 125:200]  # take only between 0 (start of the stimulus) and 300ms
+# /TODO CHANGE
+# TODO in the load_and_savez
+X_train = np.asarray(X_train, dtype='float32')
+y_train = np.asarray(y_train, dtype='int32')
+
 X_train, mean, std = normalize_stupid(X_train)
 print mean.shape
 print std.shape
 sfreq, X_test, y_test = load_and_savez("data/train_subject1*.mat", "test")
+# TODO CHANGE
+X_test = X_test[:, :, 125:200]  # take only between 0 (start of the stimulus) and 300ms
+# /TODO CHANGE
 X_test, mean, std = normalize_stupid(X_test, mean, std)
+# TODO in the load_and_savez
+X_test = np.asarray(X_test, dtype='float32')
+y_test = np.asarray(y_test, dtype='int32')
 
 X_train = X_train.reshape((X_train.shape[0], X_train.shape[1]*X_train.shape[2]))
 X_test = X_test.reshape((X_test.shape[0], X_test.shape[1]*X_test.shape[2]))
@@ -93,14 +106,18 @@ numpy_rng = np.random.RandomState(123)
 nnet = NeuralNet(numpy_rng=numpy_rng, 
         n_ins=X_train.shape[1],
         layers_types=[ReLU, ReLU, LogisticRegression],
-        layers_sizes=[100, 100],
-        n_outs=1,
+        layers_sizes=[200, 200],
+        n_outs=2,
         debugprint=0)
 train_fn = nnet.get_adadelta_trainer()
 epochs = 0
 max_epochs = 100
+#y_train = np.ndarray((y_train.shape[0], 1), buffer=y_train)
 while epochs < max_epochs:
-    for x, y in izip(X_train, y_train):
+    print "epochs:", epochs
+    for i in xrange(X_train.shape[0]):
+        x = X_train[i*50:(i+1)*50]  # 50 is the batch size
+        y = y_train[i*50:(i+1)*50]
         avg_cost = train_fn(x, y)
         print avg_cost
     
