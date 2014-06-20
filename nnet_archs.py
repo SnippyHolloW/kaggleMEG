@@ -173,7 +173,7 @@ class DropoutNet(NeuralNet):
             layers_sizes=[1024, 1024, 1024, 1024],
             dropout_rates=[0.2, 0.5, 0.5, 0.5, 0.5],
             n_outs=62 * 3,
-            rho=0.8, eps=1.5E-7,  # TODO refine
+            rho=0.9, eps=1.E-6,  # TODO refine
             debugprint=False):
         super(DropoutNet, self).__init__(numpy_rng, theano_rng, n_ins,
                 layers_types, layers_sizes, n_outs, rho, eps, debugprint)
@@ -206,200 +206,68 @@ class DropoutNet(NeuralNet):
         self.errors = self.layers[-1].errors(self.y)
 
 
-class ABNeuralNet(object):  #NeuralNet):
-    # TODO refactor
+class DatasetMiniBatchIterator(object):
+    def __init__(self, x, y, batch_size=100):
+        self.x = x
+        self.y = y
+        self.batch_size = batch_size
+
+    def __iter__(self):
+        for i in xrange((self.x.shape[0]+self.batch_size-1)
+                / self.batch_size):
+            yield (x[i*self.batch_size:(i+1)*self.batch_size],
+                   y[i*self.batch_size:(i+1)*self.batch_size])
+
+
+class EasyNet(NeuralNet):
     def __init__(self, numpy_rng, theano_rng=None, 
-            n_ins=40*3,
-            layers_types=[Linear, ReLU, ReLU, ReLU, LogisticRegression],
-            layers_sizes=[1024, 1024, 1024, 1024],
-            n_outs=62 * 3,
-            rho=0.8, eps=1.E-6,  # TODO refine
-            lambd=0.1,
+            n_ins=100,
+            layers_types=[ReLU, ReLU, ReLU, LogisticRegression],
+            layers_sizes=[1024, 1024, 1024],
+            n_outs=2,
+            rho=0.9, eps=1.E-6,  # TODO refine
             debugprint=False):
-        #super(AB_NeuralNet, self).__init__(numpy_rng, theano_rng,
-        #        n_ins, layers_types, layers_sizes, n_outs, rho, eps,
-        #        debugprint)
-        self.layers = []
-        self.params = []
-        self.n_layers = len(layers_types)
-        self.layers_types = layers_types
-        assert self.n_layers > 0
-        self._rho = rho  # ``momentum'' for adadelta
-        self._eps = eps  # epsilon for adadelta
-        self._lambda = lambd # penalty for L1 regularization
-        self._accugrads = []  # for adadelta
-        self._accudeltas = []  # for adadelta
+        super(DropoutNet, self).__init__(numpy_rng, theano_rng, n_ins,
+                layers_types, layers_sizes, n_outs, rho, eps, debugprint)
 
-        if theano_rng == None:
-            theano_rng = RandomStreams(numpy_rng.randint(2 ** 30))
+    def fit(self, x_train, y_train, x_dev=None, y_dev=None,
+            max_epochs=100, early_stopping=True, split_ratio=0.1):
+        import time, copy
+        if x_dev == None or y_dev == None:
+            from sklearn.cross_validation import train_test_split
+            x_train, x_dev, y_train, y_dev = train_test_split(x_train, y_train,
+                    test_size=split_ratio, random_state=42)
+        train_fn = self.get_adadelta_trainer()
+        train_set_iterator = DatasetMiniBatchIterator(x_train, y_train)
+        dev_set_iterator = DatasetMiniBatchIterator(x_dev, y_dev)
+        train_scoref = self.score_classif(train_set_iterator)
+        dev_scoref = self.score_classif(dev_set_iterator)
+        best_dev_loss = numpy.inf
+        epoch = 0
+        while epoch < max_epochs:
+            avg_costs = []
+            timer = time.time()
+            for x, y in train_set_iterator:
+                avg_cost = train_fn(x, y)
+                if type(avg_cost) == list:
+                    avg_costs.append(avg_cost[0])
+                else:
+                    avg_costs.append(avg_cost)
+            print('  epoch %i took %f seconds' % (epoch, time.time() - timer))
+            print('  epoch %i, avg costs %f' % \
+                  (epoch, numpy.mean(avg_costs)))
+            print('  epoch %i, training error %f' % \
+                  (epoch, numpy.mean(train_scoref())))
+            dev_errors = numpy.mean(dev_scoref())
+            if dev_errors < best_dev_loss:
+                best_dev_loss = dev_errors
+                best_params = copy.deepcopy(self.params)
+        for i, param in enumerate(best_params):
+            print param
+            self.params[i] = param
 
-        self.x1 = T.fmatrix('x1')
-        self.x2 = T.fmatrix('x2')
-        self.y = T.ivector('y')
-        
-        self.layers_ins = [n_ins] + layers_sizes
-        self.layers_outs = layers_sizes + [n_outs]
-        layer_input1 = self.x1
-        layer_input2 = self.x2
-        
-        for layer_type, n_in, n_out in zip(layers_types,
-                self.layers_ins, self.layers_outs):
-            this_layer1 = layer_type(rng=numpy_rng,
-                    input=layer_input1, n_in=n_in, n_out=n_out)
-            assert hasattr(this_layer1, 'output')
-            layer_input1 = this_layer1.output
-            self.params.extend(this_layer1.params)
-            self._accugrads.extend([build_shared_zeros(t.shape.eval(),
-                'accugrad') for t in this_layer1.params])
-            self._accudeltas.extend([build_shared_zeros(t.shape.eval(),
-                'accudelta') for t in this_layer1.params])
-            self.layers.append(this_layer1)
-            this_layer2 = layer_type(rng=numpy_rng,
-                    input=layer_input2, n_in=n_in, n_out=n_out,
-                    W=this_layer1.W, b=this_layer1.b)
-            assert hasattr(this_layer2, 'output')
-            layer_input2 = this_layer2.output
-            self.layers.append(this_layer2)
-
-        L2 = 0.
-        for param in self.params:
-            L2 += T.sum(param ** 2)
-        L1 = 0.
-        for param in self.params:
-            L1 += T.sum(abs(param))
-
-        self.squared_error = (layer_input1 - layer_input2).norm(2, axis=-1) **2
-        self.mse = T.mean(self.squared_error)
-        self.rmse = T.sqrt(self.mse)
-        self.sse = T.sum(self.squared_error)
-        self.rsse = T.sqrt(self.sse)
-
-        self.rsse_cost = T.switch(self.y, self.rsse, -self.rsse)
-        self.rmse_cost = T.switch(self.y, self.rmse, -self.rmse)
-        self.sum_rmse_costs = T.sum(self.rmse_cost)
-        self.sum_rsse_costs = T.sum(self.rsse_cost)
-        self.mean_rmse_costs = T.mean(self.rmse_cost)
-        self.mean_rsse_costs = T.mean(self.rsse_cost)
-
-        #self.cross_entropy = - (0.5 * T.sum(layer_input1 * T.log(layer_input2)
-        #    + (1 - layer_input1) * T.log(1 - layer_input2), axis=-1)) + (0.5 *
-        #        T.sum(layer_input2 * T.log(layer_input1) + (1 - layer_input2) *
-        #            T.log(1 - layer_input1), axis=-1))
-        #self.cross_entropy_cost = T.switch(self.y, self.cross_entropy,
-        #        -self.cross_entropy)
-
-        self.cos_sim = T.mean(((layer_input1 - layer_input2).norm(2, axis=-1) /
-            (layer_input1.norm(2, axis=-1) * layer_input2.norm(2, axis=-1))),
-            axis=-1)  # TODO check
-        self.cos_sim_cost = T.switch(self.y, self.cos_sim, -self.cos_sim)
-        self.mean_cos_sim_cost = T.mean(self.cos_sim_cost)
-        self.sum_cos_sim_cost = T.sum(self.cos_sim_cost)
-
-        self.cost = self.sum_cos_sim_cost
-
-        if debugprint:
-            theano.printing.debugprint(self.cost)
-
-    def __repr__(self):
-        dimensions_layers_str = map(lambda x: "x".join(map(str, x)),
-                zip(self.layers_ins, self.layers_outs))
-        return "_".join(map(lambda x: "_".join((x[0].__name__, x[1])),
-            zip(self.layers_types, dimensions_layers_str)))
-
-    def get_SGD_trainer(self, debug=False):
-        """ Returns a plain SGD minibatch trainer with learning rate as param.
-        """
-        batch_x1 = T.fmatrix('batch_x1')
-        batch_x2 = T.fmatrix('batch_x2')
-        batch_y = T.ivector('batch_y')
-        learning_rate = T.fscalar('lr')  # learning rate to use
-        # compute the gradients with respect to the model parameters
-        # using mean_cost so that the learning rate is not too dependent on the batch size
-        cost = self.mean_cos_sim_cost
-        gparams = T.grad(cost, self.params)
-
-        # compute list of weights updates
-        updates = OrderedDict()
-        for param, gparam in zip(self.params, gparams):
-            updates[param] = param - gparam * learning_rate 
-
-        outputs = cost
-        if debug:
-            outputs = [cost] + self.params + gparams +\
-                    [updates[param] for param in self.params]
-
-        train_fn = theano.function(inputs=[theano.Param(batch_x1), 
-            theano.Param(batch_x2), theano.Param(batch_y),
-            theano.Param(learning_rate)],
-            outputs=outputs,
-            updates=updates,
-            givens={self.x1: batch_x1, self.x2: batch_x2, self.y: batch_y})
-
-        return train_fn
-
-    def get_adadelta_trainer(self, debug=False):
-        batch_x1 = T.fmatrix('batch_x1')
-        batch_x2 = T.fmatrix('batch_x2')
-        batch_y = T.ivector('batch_y')
-        # compute the gradients with respect to the model parameters
-        cost = self.cost
-        gparams = T.grad(cost, self.params)
-
-        # compute list of weights updates
-        updates = OrderedDict()
-        for accugrad, accudelta, param, gparam in zip(self._accugrads,
-                self._accudeltas, self.params, gparams):
-            # c.f. Algorithm 1 in the Adadelta paper (Zeiler 2012)
-            agrad = self._rho * accugrad + (1 - self._rho) * gparam * gparam
-            dx = - T.sqrt((accudelta + self._eps) / (agrad + self._eps)) * gparam
-            updates[accudelta] = self._rho * accudelta + (1 - self._rho) * dx * dx
-            updates[param] = param + dx
-            updates[accugrad] = agrad
-
-        outputs = cost
-        if debug:
-            outputs = [cost] + self.params + gparams +\
-                    [updates[param] for param in self.params]
-
-        train_fn = theano.function(inputs=[theano.Param(batch_x1), 
-            theano.Param(batch_x2), theano.Param(batch_y)],
-            outputs=outputs,
-            updates=updates,
-            givens={self.x1: batch_x1, self.x2: batch_x2, self.y: batch_y})
-
-        return train_fn
-
-    def score_classif(self, given_set):
-        """ returns means MSEs """  # TODO change this error function
-        batch_x1 = T.fmatrix('batch_x1')
-        batch_x2 = T.fmatrix('batch_x2')
-        batch_y = T.ivector('batch_y')
-        score = theano.function(inputs=[theano.Param(batch_x1), 
-            theano.Param(batch_x2), theano.Param(batch_y)],
-                outputs=self.cost,
-                givens={self.x1: batch_x1, self.x2: batch_x2, self.y: batch_y})
-
-        # Create a function that scans the entire set given as input
-        def scoref():
-            return [score(x[0], x[1], y) for (x, y) in given_set]
-
-        return scoref
-
-    def transform_x1_x2(self):
-        batch_x1 = T.fmatrix('batch_x1')
-        batch_x2 = T.fmatrix('batch_x2')
-        transform = theano.function(inputs=[theano.Param(batch_x1), 
-            theano.Param(batch_x2)],
-                outputs=[self.layers[-2].output, self.layers[-1].output],
-                givens={self.x1: batch_x1, self.x2: batch_x2})
-        return transform
-
-    def transform_x1(self):
-        batch_x1 = T.fmatrix('batch_x1')
-        transform = theano.function(inputs=[theano.Param(batch_x1)],
-                outputs=self.layers[-2].output,
-                givens={self.x1: batch_x1})
-        return transform
-
-    # TODO DropoutABNet
+    def score(self, x, y):
+        it = DatasetMiniBatchIterator(x, y)
+        scoref = self.score_classif(it)
+        return numpy.mean(scoref())
 
