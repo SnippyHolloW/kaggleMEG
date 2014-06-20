@@ -120,14 +120,25 @@ from nnet_archs import EasyNet
 from sklearn.metrics import accuracy_score
 
 numpy_rng = np.random.RandomState(123)
+# do not forget that the first layer is n_frames * 306 because we're doing it the brute way
+# TODO do a few frames by a few frames (not 75*306, more like 5 or 10*306)
+# TODO play with L1_reg and L1_reg parameters (also you can set them to 0) independently
+# TODO play with architectures (you just need to end by a LogisticRegression)
+# TODO play with size of hidden units (50 to 2000)
+# TODO add sequentiality / temporality
+# TODO adjust features BEFORE here
 nnet = EasyNet(numpy_rng=numpy_rng, 
         n_ins=X_train.shape[1],
         layers_types=[ReLU, ReLU, LogisticRegression],
-        layers_sizes=[200, 200],
+        layers_sizes=[1000, 1000],
+        #layers_types=[ReLU, ReLU, ReLU, ReLU, LogisticRegression],
+        #layers_sizes=[200, 200, 200, 200],
         n_outs=2,
+        L1_reg=1./X_train.shape[0],
+        L2_reg=1./X_train.shape[0],
         debugprint=0)
 
-nnet.fit(X_train, y_train, X_dev, y_dev)
+nnet.fit(X_train, y_train, X_dev, y_dev, max_epochs=100)  # TODO 1000+ epochs
 print nnet.score(X_test, y_test)
 with open("nnet_clf.pkl", "wb") as f:
     cPickle.dump(nnet, f)

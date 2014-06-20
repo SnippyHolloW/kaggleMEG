@@ -215,8 +215,8 @@ class DatasetMiniBatchIterator(object):
     def __iter__(self):
         for i in xrange((self.x.shape[0]+self.batch_size-1)
                 / self.batch_size):
-            yield (x[i*self.batch_size:(i+1)*self.batch_size],
-                   y[i*self.batch_size:(i+1)*self.batch_size])
+            yield (self.x[i*self.batch_size:(i+1)*self.batch_size],
+                   self.y[i*self.batch_size:(i+1)*self.batch_size])
 
 
 class EasyNet(NeuralNet):
@@ -226,9 +226,22 @@ class EasyNet(NeuralNet):
             layers_sizes=[1024, 1024, 1024],
             n_outs=2,
             rho=0.9, eps=1.E-6,  # TODO refine
+            L1_reg=0.,
+            L2_reg=0.,
             debugprint=False):
-        super(DropoutNet, self).__init__(numpy_rng, theano_rng, n_ins,
+        super(EasyNet, self).__init__(numpy_rng, theano_rng, n_ins,
                 layers_types, layers_sizes, n_outs, rho, eps, debugprint)
+
+        L1 = shared(0.)
+        for param in self.params:
+            L1 += T.sum(abs(param)) #/ param.shape[0]
+        if L1_reg > 0.:
+            self.cost = self.cost + L1_reg * L1
+        L2 = shared(0.)
+        for param in self.params:
+            L2 += T.sum(param ** 2) #/ param.shape[0]
+        if L2_reg > 0.:
+            self.cost = self.cost + L2_reg * L2
 
     def fit(self, x_train, y_train, x_dev=None, y_dev=None,
             max_epochs=100, early_stopping=True, split_ratio=0.1):
@@ -262,8 +275,10 @@ class EasyNet(NeuralNet):
             if dev_errors < best_dev_loss:
                 best_dev_loss = dev_errors
                 best_params = copy.deepcopy(self.params)
+                print('!!!  epoch %i, validation error of best model %f' % \
+                      (epoch, dev_errors))
+            epoch += 1
         for i, param in enumerate(best_params):
-            print param
             self.params[i] = param
 
     def score(self, x, y):
