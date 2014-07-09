@@ -178,6 +178,7 @@ class DropoutNet(NeuralNet):
         super(DropoutNet, self).__init__(numpy_rng, theano_rng, n_ins,
                 layers_types, layers_sizes, n_outs, rho, eps, debugprint)
 
+        self.dropout_rates = dropout_rates
         dropout_layer_input = dropout(numpy_rng, self.x, p=dropout_rates[0])
         self.dropout_layers = []
 
@@ -205,6 +206,10 @@ class DropoutNet(NeuralNet):
         # these is the non-dropout errors
         self.errors = self.layers[-1].errors(self.y)
 
+    def __repr__(self):
+        return super(DropoutNet, self).__repr__() + "\n"\
+                + "dropout rates: " + str(self.dropout_rates)
+
 
 class DatasetMiniBatchIterator(object):
     def __init__(self, x, y, batch_size=100):
@@ -219,7 +224,57 @@ class DatasetMiniBatchIterator(object):
                    self.y[i*self.batch_size:(i+1)*self.batch_size])
 
 
-class EasyNet(NeuralNet):
+def add_fit_and_score(class_to_chg):
+    from types import MethodType
+    def fit(self, x_train, y_train, x_dev=None, y_dev=None,
+            max_epochs=100, early_stopping=True, split_ratio=0.1):
+        import time, copy
+        if x_dev == None or y_dev == None:
+            from sklearn.cross_validation import train_test_split
+            x_train, x_dev, y_train, y_dev = train_test_split(x_train, y_train,
+                    test_size=split_ratio, random_state=42)
+        train_fn = self.get_adadelta_trainer()
+        train_set_iterator = DatasetMiniBatchIterator(x_train, y_train)
+        dev_set_iterator = DatasetMiniBatchIterator(x_dev, y_dev)
+        train_scoref = self.score_classif(train_set_iterator)
+        dev_scoref = self.score_classif(dev_set_iterator)
+        best_dev_loss = numpy.inf
+        epoch = 0
+        # TODO early stopping
+        while epoch < max_epochs:
+            avg_costs = []
+            timer = time.time()
+            for x, y in train_set_iterator:
+                avg_cost = train_fn(x, y)
+                if type(avg_cost) == list:
+                    avg_costs.append(avg_cost[0])
+                else:
+                    avg_costs.append(avg_cost)
+            print('  epoch %i took %f seconds' % (epoch, time.time() - timer))
+            print('  epoch %i, avg costs %f' % \
+                  (epoch, numpy.mean(avg_costs)))
+            print('  epoch %i, training error %f' % \
+                  (epoch, numpy.mean(train_scoref())))
+            dev_errors = numpy.mean(dev_scoref())
+            if dev_errors < best_dev_loss:
+                best_dev_loss = dev_errors
+                best_params = copy.deepcopy(self.params)
+                print('!!!  epoch %i, validation error of best model %f' % \
+                      (epoch, dev_errors))
+            epoch += 1
+        for i, param in enumerate(best_params):
+            self.params[i] = param
+
+    def score(self, x, y):
+        it = DatasetMiniBatchIterator(x, y)
+        scoref = self.score_classif(it)
+        return numpy.mean(scoref())
+
+    class_to_chg.fit = MethodType(fit, None, class_to_chg)
+    class_to_chg.score = MethodType(score, None, class_to_chg)
+
+
+class RegularizedNet(NeuralNet):
     def __init__(self, numpy_rng, theano_rng=None, 
             n_ins=100,
             layers_types=[ReLU, ReLU, ReLU, LogisticRegression],
@@ -242,121 +297,4 @@ class EasyNet(NeuralNet):
             L2 += T.sum(param ** 2) #/ param.shape[0]
         if L2_reg > 0.:
             self.cost = self.cost + L2_reg * L2
-
-    def fit(self, x_train, y_train, x_dev=None, y_dev=None,
-            max_epochs=100, early_stopping=True, split_ratio=0.1):
-        import time, copy
-        if x_dev == None or y_dev == None:
-            from sklearn.cross_validation import train_test_split
-            x_train, x_dev, y_train, y_dev = train_test_split(x_train, y_train,
-                    test_size=split_ratio, random_state=42)
-        train_fn = self.get_adadelta_trainer()
-        train_set_iterator = DatasetMiniBatchIterator(x_train, y_train)
-        dev_set_iterator = DatasetMiniBatchIterator(x_dev, y_dev)
-        train_scoref = self.score_classif(train_set_iterator)
-        dev_scoref = self.score_classif(dev_set_iterator)
-        best_dev_loss = numpy.inf
-        epoch = 0
-        # TODO early stopping
-        while epoch < max_epochs:
-            avg_costs = []
-            timer = time.time()
-            for x, y in train_set_iterator:
-                avg_cost = train_fn(x, y)
-                if type(avg_cost) == list:
-                    avg_costs.append(avg_cost[0])
-                else:
-                    avg_costs.append(avg_cost)
-            print('  epoch %i took %f seconds' % (epoch, time.time() - timer))
-            print('  epoch %i, avg costs %f' % \
-                  (epoch, numpy.mean(avg_costs)))
-            print('  epoch %i, training error %f' % \
-                  (epoch, numpy.mean(train_scoref())))
-            dev_errors = numpy.mean(dev_scoref())
-            if dev_errors < best_dev_loss:
-                best_dev_loss = dev_errors
-                best_params = copy.deepcopy(self.params)
-                print('!!!  epoch %i, validation error of best model %f' % \
-                      (epoch, dev_errors))
-            epoch += 1
-        for i, param in enumerate(best_params):
-            self.params[i] = param
-
-    def score(self, x, y):
-        it = DatasetMiniBatchIterator(x, y)
-        scoref = self.score_classif(it)
-        return numpy.mean(scoref())
-
-
-# TODO change these Easy* classes by a class decorator that adds fit() and score()
-class EasyDropoutNet(DropoutNet):
-    def __init__(self, numpy_rng, theano_rng=None, 
-            n_ins=100,
-            layers_types=[ReLU, ReLU, ReLU, LogisticRegression],
-            layers_sizes=[1024, 1024, 1024],
-            dropout_rates=[0.2, 0.5, 0.5, 0.5, 0.5],
-            n_outs=2,
-            rho=0.9, eps=1.E-6,  # TODO refine
-            L1_reg=0.,
-            L2_reg=0.,
-            debugprint=False):
-        super(EasyDropoutNet, self).__init__(numpy_rng, theano_rng, n_ins,
-                layers_types, layers_sizes, dropout_rates,
-                n_outs, rho, eps, debugprint)
-
-        L1 = shared(0.)
-        for param in self.params:
-            L1 += T.sum(abs(param)) #/ param.shape[0]
-        if L1_reg > 0.:
-            self.cost = self.cost + L1_reg * L1
-        L2 = shared(0.)
-        for param in self.params:
-            L2 += T.sum(param ** 2) #/ param.shape[0]
-        if L2_reg > 0.:
-            self.cost = self.cost + L2_reg * L2
-
-
-    def fit(self, x_train, y_train, x_dev=None, y_dev=None,
-            max_epochs=100, early_stopping=True, split_ratio=0.1):
-        import time, copy
-        if x_dev == None or y_dev == None:
-            from sklearn.cross_validation import train_test_split
-            x_train, x_dev, y_train, y_dev = train_test_split(x_train, y_train,
-                    test_size=split_ratio, random_state=42)
-        train_fn = self.get_adadelta_trainer()
-        train_set_iterator = DatasetMiniBatchIterator(x_train, y_train)
-        dev_set_iterator = DatasetMiniBatchIterator(x_dev, y_dev)
-        train_scoref = self.score_classif(train_set_iterator)
-        dev_scoref = self.score_classif(dev_set_iterator)
-        best_dev_loss = numpy.inf
-        epoch = 0
-        # TODO early stopping
-        while epoch < max_epochs:
-            avg_costs = []
-            timer = time.time()
-            for x, y in train_set_iterator:
-                avg_cost = train_fn(x, y)
-                if type(avg_cost) == list:
-                    avg_costs.append(avg_cost[0])
-                else:
-                    avg_costs.append(avg_cost)
-            print('  epoch %i took %f seconds' % (epoch, time.time() - timer))
-            print('  epoch %i, avg costs %f' % \
-                  (epoch, numpy.mean(avg_costs)))
-            print('  epoch %i, training error %f' % \
-                  (epoch, numpy.mean(train_scoref())))
-            dev_errors = numpy.mean(dev_scoref())
-            if dev_errors < best_dev_loss:
-                best_dev_loss = dev_errors
-                best_params = copy.deepcopy(self.params)
-                print('!!!  epoch %i, validation error of best model %f' % \
-                      (epoch, dev_errors))
-            epoch += 1
-        for i, param in enumerate(best_params):
-            self.params[i] = param
-
-    def score(self, x, y):
-        it = DatasetMiniBatchIterator(x, y)
-        scoref = self.score_classif(it)
-        return numpy.mean(scoref())
 

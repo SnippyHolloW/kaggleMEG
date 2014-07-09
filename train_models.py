@@ -13,6 +13,7 @@ START_FRAME = 125  # take only between 0 (start of the stimulus) and 200ms
 END_FRAME = 175
 #START_FRAME = 150
 #END_FRAME = 175
+DROPOUT = True  # Use dropout or not?
 
 def load_and_savez(ifname, ofname):
     ofname = ofname + "_subjects.npz"
@@ -121,7 +122,9 @@ X_dev = X_dev.reshape((X_dev.shape[0], X_dev.shape[1]*X_dev.shape[2]))
 
 from layers import ReLU 
 from classifiers import LogisticRegression
-from nnet_archs import EasyNet, EasyDropoutNet
+from nnet_archs import RegularizedNet, DropoutNet, add_fit_and_score
+add_fit_and_score(RegularizedNet)
+add_fit_and_score(DropoutNet)
 from sklearn.metrics import accuracy_score
 
 numpy_rng = np.random.RandomState(123)
@@ -132,21 +135,31 @@ numpy_rng = np.random.RandomState(123)
 # TODO play with size of hidden units (50 to 2000)
 # TODO add sequentiality / temporality
 # TODO adjust features BEFORE here
-nnet = EasyNet(DropoutNet(numpy_rng=numpy_rng, 
-        n_ins=X_train.shape[1],
-        layers_types=[ReLU, ReLU, LogisticRegression],
-        layers_sizes=[2000, 1000],
-        dropout_rates=[0.2, 0.5, 0.5],
-        #layers_types=[ReLU, ReLU, ReLU, ReLU, LogisticRegression],
-        #layers_sizes=[500, 500, 500, 500],
-        #dropout_rates=[0.2, 0.5, 0.5, 0.5, 0.5],
-        n_outs=2,
-        #L1_reg=1./X_train.shape[0],
-        #L2_reg=1./X_train.shape[0],
-        L1_reg=0.,
-        L2_reg=0.,
-        debugprint=0))
 
+
+nnet = None
+if DROPOUT:
+    nnet = DropoutNet(numpy_rng=numpy_rng, 
+            n_ins=X_train.shape[1],
+            #layers_types=[ReLU, ReLU, LogisticRegression],
+            #layers_sizes=[1000, 500],
+            #dropout_rates=[0.2, 0.5, 0.5],  #[0., 0.5, 0.5],
+            layers_types=[ReLU, ReLU, ReLU, LogisticRegression],
+            layers_sizes=[2000, 1000, 1000],
+            dropout_rates=[0.2, 0.5, 0.5, 0.5],
+            n_outs=2,
+            debugprint=0)
+else:
+    nnet = RegularizedNet(numpy_rng=numpy_rng, 
+            n_ins=X_train.shape[1],
+            layers_types=[ReLU, ReLU, LogisticRegression],
+            layers_sizes=[2000, 1000],
+            n_outs=2,
+            L1_reg=1./X_train.shape[0],
+            L2_reg=1./X_train.shape[0],
+            debugprint=0)
+
+print nnet
 nnet.fit(X_train, y_train, X_dev, y_dev, max_epochs=500)  # TODO 1000+ epochs
 print nnet.score(X_test, y_test)
 with open("nnet_clf.pkl", "wb") as f:
