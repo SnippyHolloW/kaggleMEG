@@ -9,6 +9,11 @@ from itertools import izip
 # get the .mat data from 
 # https://www.kaggle.com/c/decoding-the-human-brain/download/train_01_06.zip
 
+START_FRAME = 125  # take only between 0 (start of the stimulus) and 200ms
+END_FRAME = 175
+#START_FRAME = 150
+#END_FRAME = 175
+
 def load_and_savez(ifname, ofname):
     ofname = ofname + "_subjects.npz"
     try:
@@ -51,7 +56,7 @@ def normalize_stupid(data, mean=None, std=None):
 ### TRAIN
 sfreq, X_train, y_train = load_and_savez("data/train_subject0*.mat", "train")
 # TODO CHANGE
-X_train = X_train[:, :, 125:200]  # take only between 0 (start of the stimulus) and 300ms
+X_train = X_train[:, :, START_FRAME:END_FRAME]
 # /TODO CHANGE
 # TODO in the load_and_savez
 X_train = np.asarray(X_train, dtype='float32')
@@ -64,7 +69,7 @@ print std.shape
 ### VALIDATION
 sfreq, X_dev, y_dev = load_and_savez("data/train_subject1[0-3].mat", "dev")
 # TODO CHANGE
-X_dev = X_dev[:, :, 125:200]  # take only between 0 (start of the stimulus) and 300ms
+X_dev = X_dev[:, :, START_FRAME:END_FRAME]
 # /TODO CHANGE
 X_dev, _, _ = normalize_stupid(X_dev, mean, std)
 # TODO in the load_and_savez
@@ -74,7 +79,7 @@ y_dev = np.asarray(y_dev, dtype='int32')
 ### TEST
 sfreq, X_test, y_test = load_and_savez("data/train_subject1[4-6].mat", "test")
 # TODO CHANGE
-X_test = X_test[:, :, 125:200]  # take only between 0 (start of the stimulus) and 300ms
+X_test = X_test[:, :, START_FRAME:END_FRAME]
 # /TODO CHANGE
 X_test, _, _ = normalize_stupid(X_test, mean, std)
 # TODO in the load_and_savez
@@ -116,7 +121,7 @@ X_dev = X_dev.reshape((X_dev.shape[0], X_dev.shape[1]*X_dev.shape[2]))
 
 from layers import ReLU 
 from classifiers import LogisticRegression
-from nnet_archs import EasyNet
+from nnet_archs import EasyNet, EasyDropoutNet
 from sklearn.metrics import accuracy_score
 
 numpy_rng = np.random.RandomState(123)
@@ -127,18 +132,22 @@ numpy_rng = np.random.RandomState(123)
 # TODO play with size of hidden units (50 to 2000)
 # TODO add sequentiality / temporality
 # TODO adjust features BEFORE here
-nnet = EasyNet(numpy_rng=numpy_rng, 
+nnet = EasyNet(DropoutNet(numpy_rng=numpy_rng, 
         n_ins=X_train.shape[1],
         layers_types=[ReLU, ReLU, LogisticRegression],
-        layers_sizes=[1000, 1000],
+        layers_sizes=[2000, 1000],
+        dropout_rates=[0.2, 0.5, 0.5],
         #layers_types=[ReLU, ReLU, ReLU, ReLU, LogisticRegression],
-        #layers_sizes=[200, 200, 200, 200],
+        #layers_sizes=[500, 500, 500, 500],
+        #dropout_rates=[0.2, 0.5, 0.5, 0.5, 0.5],
         n_outs=2,
-        L1_reg=1./X_train.shape[0],
-        L2_reg=1./X_train.shape[0],
-        debugprint=0)
+        #L1_reg=1./X_train.shape[0],
+        #L2_reg=1./X_train.shape[0],
+        L1_reg=0.,
+        L2_reg=0.,
+        debugprint=0))
 
-nnet.fit(X_train, y_train, X_dev, y_dev, max_epochs=100)  # TODO 1000+ epochs
+nnet.fit(X_train, y_train, X_dev, y_dev, max_epochs=500)  # TODO 1000+ epochs
 print nnet.score(X_test, y_test)
 with open("nnet_clf.pkl", "wb") as f:
     cPickle.dump(nnet, f)
