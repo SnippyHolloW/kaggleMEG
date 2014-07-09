@@ -141,12 +141,12 @@ nnet = None
 if DROPOUT:
     nnet = DropoutNet(numpy_rng=numpy_rng, 
             n_ins=X_train.shape[1],
-            #layers_types=[ReLU, ReLU, LogisticRegression],
-            #layers_sizes=[1000, 500],
-            #dropout_rates=[0.2, 0.5, 0.5],  #[0., 0.5, 0.5],
-            layers_types=[ReLU, ReLU, ReLU, LogisticRegression],
-            layers_sizes=[2000, 1000, 1000],
-            dropout_rates=[0.2, 0.5, 0.5, 0.5],
+            layers_types=[ReLU, ReLU, LogisticRegression],
+            layers_sizes=[1000, 500],
+            dropout_rates=[0.4, 0.5, 0.5],  #[0., 0.5, 0.5],
+            #layers_types=[ReLU, ReLU, ReLU, LogisticRegression],
+            #layers_sizes=[2000, 1000, 1000],
+            #dropout_rates=[0.2, 0.5, 0.5, 0.5],
             n_outs=2,
             debugprint=0)
 else:
