@@ -284,7 +284,7 @@ class RegularizedNet(NeuralNet):
             L1_reg=0.,
             L2_reg=0.,
             debugprint=False):
-        super(NeuralNet, self).__init__(numpy_rng, theano_rng, n_ins,
+        super(RegularizedNet, self).__init__(numpy_rng, theano_rng, n_ins,
                 layers_types, layers_sizes, n_outs, rho, eps, debugprint)
 
         L1 = shared(0.)
